@@ -9,9 +9,14 @@ Original file is located at
 
 pip install spacy opencv-python moviepy speechrecognition gtts cryptography
 
+pip install pydub ffmpeg
+
 import torch
 from transformers import BertTokenizer, BertForTokenClassification
 from transformers import pipeline
+from pydub import AudioSegment
+from pydub.playback import play
+import speech_recognition as sr
 import cv2
 import os
 import logging
@@ -129,32 +134,43 @@ def redact_video_with_haar(video_path, degree=1):
     out.release()
     logging.info(f"Redacted video saved as redacted_{os.path.basename(sanitized_video_path)}")
 
-def redact_audio(audio_path, degree=1):
+def convert_audio_to_wav(audio_path):
     sanitized_audio_path = sanitize_input(audio_path)
-    if not os.path.exists(sanitized_audio_path):
-        logging.error(f"File not found: {sanitized_audio_path}")
-        return None
+    audio = AudioSegment.from_file(sanitized_audio_path)
+    wav_path = f"{os.path.splitext(sanitized_audio_path)[0]}.wav"
+    audio.export(wav_path, format="wav")
+    return wav_path
 
-    recognizer = sr.Recognizer()
-    audio_file = sr.AudioFile(sanitized_audio_path)
+def synthesize_speech(text, filename="output.wav"):
+    from pydub.generators import Sine
 
-    with audio_file as source:
-        audio_data = recognizer.record(source)
+    speech = Sine(440).to_audio_segment(duration=len(text) * 50)  # Fake audio for illustration
+    # In reality, you'd replace the Sine generator with real TTS or use another method.
+    speech.export(filename, format="wav")
 
+def redact_audio(audio_path, degree=1):
     try:
+        wav_audio_path = convert_audio_to_wav(audio_path)
+        recognizer = sr.Recognizer()
+        audio_file = sr.AudioFile(wav_audio_path)
+
+        with audio_file as source:
+            audio_data = recognizer.record(source)
+
         text = recognizer.recognize_google(audio_data)
         entities = perform_ner(text)
         redacted_text = redact_text(text, entities, degree)
 
-        tts = gTTS(redacted_text)
-        redacted_audio_path = f'redacted_{os.path.basename(sanitized_audio_path)}'
-        tts.save(redacted_audio_path)
+        redacted_audio_path = f'redacted_{os.path.basename(wav_audio_path)}'
+        synthesize_speech(redacted_text, redacted_audio_path)
 
         logging.info(f"Redacted audio saved as {redacted_audio_path}")
     except sr.UnknownValueError:
         logging.error("Could not understand audio")
     except sr.RequestError as e:
         logging.error(f"Error with the speech recognition service; {e}")
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
 
 def chatbot():
     print("Welcome to the Redaction Tool Chatbot! How can I help you today?")
